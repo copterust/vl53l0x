@@ -1,0 +1,18 @@
+[package]
+authors = ["Roma Sokolov", "Alexander Zhuravlev"]
+categories = ["embedded", "hardware-support", "no-std"]
+description = "A platform agnostic driver to interface with the vl53l0x (time-to-flight sensor)"
+documentation = "https://docs.rs/lsm303c"
+keywords = ["embedded-hal-driver", "range", "time-fo-flight", "distance"]
+license = "MIT"
+name = "vl53l0x"
+repository = "https://github.com/copterust/lsm303c"
+version = "0.1.5-alpha.0"
+
+[dependencies]
+embedded-hal = "0.2.1"
+generic-array = "0.12.0"
+
+[dependencies.cast]
+default-features = false
+version = "0.2.2"

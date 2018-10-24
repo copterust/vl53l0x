@@ -1,3 +1,54 @@
-# VL53L0X ToF ranging sensor
+# `vl53l0x`
 
-WIP for i2c sensor. One can use serial-to-usb converter and minicom to get results: `minicom -D /dev/tty.usbserial-A20027Ve -b 9600`.
+> no_std driver for the vl53l0x (accelerometer + magnetometer/compass).
+
+[![Build Status](https://travis-ci.org/copterust/vl53l0x.svg?branch=master)](https://travis-ci.org/copterust/vl53l0x)
+
+## What works
+
+- To be tested
+
+## Supported chips
+
+* `VL53L0X`;
+
+
+## Basic usage
+
+Include [library](https://crates.io/crates/vl53l0x) as a dependency in your Cargo.toml
+[![crates.io](http://meritbadge.herokuapp.com/vl53l0x?style=flat-square)](https://crates.io/crates/vl53l0x):
+
+```
+[dependencies.vl53l0x]
+version = "<version>"
+```
+
+Use embedded-hal implementation to get I2C handle and delay then create vl53l0x handle:
+
+```rust
+extern crate vl53l0x; // or just use vl53l0x; if 2018 edition is used.
+
+// to create sensor with default configuration:
+let mut lsm = VL53L0X::default(l2c, &mut delay)?;
+// to get all supported measurements:
+let all = marg.all()?;
+println!("{:?}", all);
+```
+
+## More examples
+
+Number of examples can be found in [proving-ground](https://github.com/copterust/proving-ground) repo.
+
+## Documentation
+
+API Docs available on [docs.rs](https://docs.rs/vl53l0x).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.

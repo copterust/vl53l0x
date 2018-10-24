@@ -186,9 +186,15 @@ where
     }
 
     fn read6(&mut self, reg: Register) -> [u8; 6] {
-        let mut data: [u8; 6] = [0, 0, 0, 0, 0, 0];
-        let _ = self.com.write_read(ADDRESS, &[reg as u8], &mut data);
-        data
+        let buffer: GenericArray<u8, U6> = match self.read_registers(reg) {
+            Ok(b) => b,
+            Err(_) => panic!("err"),
+        };
+        // XXX: copy!
+        let mut ret: [u8; 6] = Default::default();
+        ret.copy_from_slice(buffer.as_slice());
+
+        ret
     }
 
     fn read_registers<N>(&mut self, reg: Register) -> Result<GenericArray<u8, N>, E>
@@ -268,7 +274,7 @@ where
 
         // The SPAD map (RefGoodSpadMap) is read by VL53L0X_get_info_from_device() in the API,
         // but the same data seems to be more easily readable from GLOBAL_CONFIG_SPAD_ENABLES_REF_0 through _6, so read it from there
-        let mut ref_spad_map: [u8; 6] = self.read6(Register::GLOBAL_CONFIG_SPAD_ENABLES_REF_0);
+        let mut ref_spad_map = self.read6(Register::GLOBAL_CONFIG_SPAD_ENABLES_REF_0);
 
         // -- VL53L0X_set_reference_spads() begin (assume NVM values are valid)
 

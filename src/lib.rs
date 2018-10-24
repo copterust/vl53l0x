@@ -1,3 +1,5 @@
+//! Dummy
+
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![allow(dead_code, unused)]
@@ -7,10 +9,12 @@ extern crate embedded_hal as ehal;
 
 use ehal::blocking::i2c::{Write, WriteRead};
 
-pub const ADDRESS: u8 = 0x29;
+const ADDRESS: u8 = 0x29;
 
+/// dummy
 pub struct VL53L0x<I2C: ehal::blocking::i2c::WriteRead> {
     com: I2C,
+    /// dummy
     pub revision_id: u8,
     io_mode2v8: bool,
     stop_variable: u8,
@@ -30,6 +34,7 @@ impl<I2C, E> VL53L0x<I2C>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
 {
+    /// Dummy.
     pub fn new(i2c: I2C) -> Result<VL53L0x<I2C>, Error<E>>
     where
         I2C: ehal::blocking::i2c::WriteRead<Error = E>,
@@ -427,6 +432,7 @@ where
         // VL53L0X_PerformRefCalibration() end
     }
 
+    /// Returns who am i
     pub fn who_am_i(&mut self) -> u8 {
         self.read_register(Register::WhoAmI)
     }

@@ -5,9 +5,17 @@
 #![allow(dead_code, unused)]
 #![no_std]
 
+extern crate cast;
 extern crate embedded_hal as ehal;
+extern crate generic_array;
+
+use core::mem;
+
+use cast::u16;
 
 use ehal::blocking::i2c::{Write, WriteRead};
+use generic_array::typenum::consts::*;
+use generic_array::{ArrayLength, GenericArray};
 
 const ADDRESS: u8 = 0x29;
 
@@ -18,7 +26,6 @@ pub struct VL53L0x<I2C: ehal::blocking::i2c::WriteRead> {
     pub revision_id: u8,
     io_mode2v8: bool,
     stop_variable: u8,
-    timeout_start_milliseconds: i32,
 }
 
 /// MPU Error
@@ -28,6 +35,14 @@ pub enum Error<E> {
     InvalidDevice(u8),
     /// Underlying bus error.
     BusError(E),
+    /// Timeout
+    Timeout,
+}
+
+impl<E> core::convert::From<E> for Error<E> {
+    fn from(error: E) -> Self {
+        Error::BusError(error)
+    }
 }
 
 impl<I2C, E> VL53L0x<I2C>
@@ -44,7 +59,6 @@ where
             revision_id: 0x00,
             io_mode2v8: true,
             stop_variable: 0,
-            timeout_start_milliseconds: 0,
         };
 
         let wai = chip.who_am_i();
@@ -177,32 +191,37 @@ where
         data
     }
 
-    // uint16_t VL53L0X::readRangeContinuousMillimeters() {
-    //         startTimeout();
-    //         while ((this->readRegister(RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
-    //                 if (checkTimeoutExpired()) {
-    //                         this->didTimeout = true;
-    //                         return 65535;
-    //                 }
-    //                 usleep(1);
-    //         }
+    fn read_registers<N>(&mut self, reg: Register) -> Result<GenericArray<u8, N>, E>
+    where
+        N: ArrayLength<u8>,
+    {
+        let mut buffer: GenericArray<u8, N> = unsafe { mem::uninitialized() };
 
-    //         // assumptions: Linearity Corrective Gain is 1000 (default);
-    //         // fractional ranging is not enabled
-    //         // Note: reading 16-bit register was working on Arduino but here it's not, thus double read and manual addition
-    //         uint16_t range = this->readRegister16Bit(RESULT_RANGE_STATUS + 10);
-    //         // uint8_t rangeA = this->readRegister(RESULT_RANGE_STATUS + 10);
-    //         // uint8_t rangeB = this->readRegister(RESULT_RANGE_STATUS + 11);
-    //         // uint16_t range = ((uint16_t)(rangeA)<<8) + (uint16_t)(rangeB);
+        {
+            let buffer: &mut [u8] = &mut buffer;
+            const I2C_AUTO_INCREMENT: u8 = 1 << 7;
+            self.com
+                .write_read(ADDRESS, &[(reg as u8) | I2C_AUTO_INCREMENT], buffer)?;
+        }
 
-    //         this->writeRegister(SYSTEM_INTERRUPT_CLEAR, 0x01);
-
-    //         return range;
-    // }
+        Ok(buffer)
+    }
 
     /// readRangeContinuousMillimeters
-    pub fn read_range_continuous_millimeters() -> u16 {
-        0
+    pub fn read_range_continuous_millimeters(&mut self) -> Result<i16, Error<E>> {
+        let mut c = 0;
+        while ((self.read_register(Register::RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
+            c += 1;
+            if c == 65535 {
+                return Err(Error::Timeout);
+            }
+        }
+        let buffer: GenericArray<u8, U6> =
+            self.read_registers(Register::RESULT_RANGE_STATUS_plus_10)?;
+        let range = ((u16(buffer[1]) << 8) | u16(buffer[0])) as i16;
+        self.write_register(Register::SYSTEM_INTERRUPT_CLEAR, 0x01);
+
+        Ok(range)
     }
 
     fn init_hardware(&mut self) {
@@ -480,4 +499,7 @@ enum Register {
     SYSTEM_INTERRUPT_CONFIG_GPIO = 0x0A,
     GPIO_HV_MUX_ACTIVE_HIGH = 0x84,
     SYSTEM_INTERRUPT_CLEAR = 0x0B,
+    RESULT_INTERRUPT_STATUS = 0x13,
+    RESULT_RANGE_STATUS = 0x14,
+    RESULT_RANGE_STATUS_plus_10 = 0x1e,
 }

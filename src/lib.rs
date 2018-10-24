@@ -1,4 +1,8 @@
-#[allow(unused, dead_code)]
+#![deny(missing_docs)]
+#![deny(warnings)]
+#![allow(dead_code, unused)]
+#![no_std]
+
 extern crate embedded_hal as ehal;
 
 use ehal::blocking::i2c::{Write, WriteRead};

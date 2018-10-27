@@ -216,7 +216,7 @@ where
     /// readRangeContinuousMillimeters
     pub fn read_range_continuous_millimeters(&mut self) -> Result<i16, Error<E>> {
         let mut c = 0;
-        while ((self.read_register(Register::RESULT_INTERRUPT_STATUS) & 0x07) == 0) {
+        while ((self.read_register(Register::RESULT_INTERRUPT_STATUS) & 0x07) != 0) {
             c += 1;
             if c == 65535 {
                 return Err(Error::Timeout);

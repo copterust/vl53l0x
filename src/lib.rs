@@ -230,6 +230,31 @@ where
         Ok(range)
     }
 
+    /// readRangeSingleMillimeters
+    pub fn read_range_single_millimeters(&mut self) -> Result<i16, Error<E>> {
+        self.write_byte(0x80, 0x01);
+        self.write_byte(0xFF, 0x01);
+        self.write_byte(0x00, 0x00);
+        let sv = self.stop_variable;
+        self.write_byte(0x91, sv);
+        self.write_byte(0x00, 0x01);
+        self.write_byte(0xFF, 0x00);
+        self.write_byte(0x80, 0x00);
+
+        self.write_register(Register::SYSRANGE_START, 0x01);
+
+        // "Wait until start bit has been cleared"
+        let mut c = 0;
+        while (self.read_register(Register::SYSRANGE_START) & 0x01) != 0 {
+            c += 1;
+            if c == 65535 {
+                return Err(Error::Timeout);
+            }
+        }
+
+        self.read_range_continuous_millimeters()
+    }
+
     fn init_hardware(&mut self) {
         // Enable the sensor
 
@@ -493,6 +518,7 @@ where
 
 #[allow(non_camel_case_types)]
 enum Register {
+    SYSRANGE_START = 0x00,
     WHO_AM_I = 0xC0,
     VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV = 0x89,
     MSRC_CONFIG_CONTROL = 0x60,

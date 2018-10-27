@@ -459,7 +459,7 @@ where
 
     /// Returns who am i
     pub fn who_am_i(&mut self) -> u8 {
-        self.read_register(Register::WhoAmI)
+        self.read_register(Register::WHO_AM_I)
     }
 
     /*
@@ -493,7 +493,7 @@ where
 
 #[allow(non_camel_case_types)]
 enum Register {
-    WhoAmI = 0xC0,
+    WHO_AM_I = 0xC0,
     VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV = 0x89,
     MSRC_CONFIG_CONTROL = 0x60,
     SYSTEM_SEQUENCE_CONFIG = 0x01,

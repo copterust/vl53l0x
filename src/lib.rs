@@ -26,6 +26,7 @@ pub struct VL53L0x<I2C: ehal::blocking::i2c::WriteRead> {
     pub revision_id: u8,
     io_mode2v8: bool,
     stop_variable: u8,
+    measurement_timing_budget_microseconds: u32,
 }
 
 /// MPU Error
@@ -59,6 +60,7 @@ where
             revision_id: 0x00,
             io_mode2v8: true,
             stop_variable: 0,
+            measurement_timing_budget_microseconds: 0,
         };
 
         let wai = chip.who_am_i()?;
@@ -280,7 +282,7 @@ where
         let mut c = 0;
         while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07) == 0 {
             c += 1;
-            if c == 65535 {
+            if c == 10000 {
                 return Err(Error::Timeout);
             }
         }
@@ -308,12 +310,29 @@ where
         let mut c = 0;
         while (self.read_register(Register::SYSRANGE_START)? & 0x01) != 0 {
             c += 1;
-            if c == 65535 {
+            if c == 10000 {
                 return Err(Error::Timeout);
             }
         }
 
         self.read_range_continuous_millimeters()
+    }
+
+    // performSingleRefCalibration(uint8_t vhvInitByte)
+    fn perform_single_ref_calibration(&mut self, vhv_init_byte: u8) -> Result<(), Error<E>> {
+        // VL53L0X_REG_SYSRANGE_MODE_START_STOP
+        self.write_register(Register::SYSRANGE_START, 0x01 | vhv_init_byte)?;
+        let mut c = 0;
+        while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07) == 0 {
+            c += 1;
+            if c == 10000 {
+                return Err(Error::Timeout);
+            }
+        }
+        self.write_register(Register::SYSTEM_INTERRUPT_CLEAR, 0x01)?;
+        self.write_register(Register::SYSRANGE_START, 0x00)?;
+
+        Ok(())
     }
 
     fn init_hardware(&mut self) -> Result<(), Error<E>> {
@@ -371,7 +390,7 @@ where
         self.write_register(Register::GLOBAL_CONFIG_REF_EN_START_SELECT, 0xB4)?;
 
         // 12 is the first aperture spad
-        let first_spad_to_enable = if spad_type_is_aperture > 0 { 12 } else { 0 };
+        let first_spad_to_enable = if spad_type_is_aperture != 0 { 12 } else { 0 };
         let mut spads_enabled: u8 = 0;
 
         for i in 0..48 {
@@ -496,22 +515,18 @@ where
         self.write_register(Register::SYSTEM_INTERRUPT_CLEAR, 0x01)?;
 
         // -- VL53L0X_SetGpioConfig() end
-        /*
-        TODO
-        self.measurement_timing_budget_microseconds = self.get_measurement_timing_budget();
-        */
         // "Disable MSRC and TCC by default"
         // MSRC = Minimum Signal Rate Check
         // TCC = Target CentreCheck
         // -- VL53L0X_SetSequenceStepEnable() begin
-
+        self.measurement_timing_budget_microseconds = self.get_measurement_timing_budget()?;
         self.write_register(Register::SYSTEM_SEQUENCE_CONFIG, 0xE8)?;
 
         // -- VL53L0X_SetSequenceStepEnable() end
 
         // "Recalculate timing budget"
-        // TODO
-        // self.set_measurement_timing_budget(self.measurement_timing_budget_microseconds);
+        let mtbm = self.measurement_timing_budget_microseconds;
+        self.set_measurement_timing_budget(mtbm)?;
 
         // VL53L0X_StaticInit() end
 
@@ -520,20 +535,12 @@ where
         // -- VL53L0X_perform_vhv_calibration() begin
 
         self.write_register(Register::SYSTEM_SEQUENCE_CONFIG, 0x01)?;
-        // TODO
-        // if (!self.perform_single_ref_calibration(0x40)) {
-        //     throw(std::runtime_error("Failed performing ref/vhv calibration!"));
-        // }
-
+        self.perform_single_ref_calibration(0x40)?;
         // -- VL53L0X_perform_vhv_calibration() end
-
         // -- VL53L0X_perform_phase_calibration() begin
 
         self.write_register(Register::SYSTEM_SEQUENCE_CONFIG, 0x02)?;
-        // TODO:
-        // if (!self.perform_single_ref_calibration(0x00)) {
-        //     throw(std::runtime_error("Failed performing ref/phase calibration!"));
-        // }
+        self.perform_single_ref_calibration(0x00)?;
 
         // -- VL53L0X_perform_phase_calibration() end
 
@@ -547,6 +554,175 @@ where
     /// Returns who am i
     pub fn who_am_i(&mut self) -> Result<u8, E> {
         self.read_register(Register::WHO_AM_I)
+    }
+
+    fn get_vcsel_pulse_period(&mut self, ty: VcselPeriodType) -> Result<u8, E> {
+        match ty {
+            VcselPeriodType::VcselPeriodPreRange => Ok(decode_vcsel_period(
+                self.read_register(Register::PRE_RANGE_CONFIG_VCSEL_PERIOD)?,
+            )),
+            VcselPeriodType::VcselPeriodFinalRange => Ok(decode_vcsel_period(
+                self.read_register(Register::FINAL_RANGE_CONFIG_VCSEL_PERIOD)?,
+            )),
+        }
+    }
+
+    // getSequenceStepEnables(VL53L0XSequenceStepEnables* enables) {
+    fn get_sequence_step_enables(&mut self) -> Result<SeqStepEnables, E> {
+        let sequence_config: u8 = self.read_register(Register::SYSTEM_SEQUENCE_CONFIG)?;
+        Ok(SeqStepEnables {
+            tcc: ((sequence_config >> 4) & 0x1) == 1,
+            dss: ((sequence_config >> 3) & 0x1) == 1,
+            msrc: ((sequence_config >> 2) & 0x1) == 1,
+            pre_range: ((sequence_config >> 6) & 0x1) == 1,
+            final_range: ((sequence_config >> 7) & 0x1) == 1,
+        })
+    }
+
+    // getSequenceStepTimeouts(timeouts)
+    fn get_sequence_step_timeouts(
+        &mut self,
+        enables: &SeqStepEnables,
+    ) -> Result<SeqStepTimeouts, E> {
+        let pre_range_mclks =
+            decode_timeout(self.read_16bit(Register::PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI)?);
+        let mut final_range_mclks =
+            decode_timeout(self.read_16bit(Register::FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI)?);
+        if enables.pre_range {
+            final_range_mclks -= pre_range_mclks;
+        };
+        let pre_range_vcselperiod_pclks =
+            self.get_vcsel_pulse_period(VcselPeriodType::VcselPeriodPreRange)?;
+        let msrc_dss_tcc_mclks = self.read_register(Register::MSRC_CONFIG_TIMEOUT_MACROP)? + 1;
+        let final_range_vcsel_period_pclks =
+            self.get_vcsel_pulse_period(VcselPeriodType::VcselPeriodFinalRange)?;
+        Ok(SeqStepTimeouts {
+            pre_range_vcselperiod_pclks,
+            msrc_dss_tcc_mclks,
+            msrc_dss_tcc_microseconds: timeout_mclks_to_microseconds(
+                msrc_dss_tcc_mclks as u16,
+                pre_range_vcselperiod_pclks,
+            ),
+            pre_range_mclks: pre_range_mclks,
+            pre_range_microseconds: timeout_mclks_to_microseconds(
+                pre_range_mclks,
+                pre_range_vcselperiod_pclks,
+            ),
+            final_range_mclks,
+            final_range_vcsel_period_pclks,
+            final_range_microseconds: timeout_mclks_to_microseconds(
+                final_range_mclks,
+                final_range_vcsel_period_pclks,
+            ),
+        })
+    }
+
+    // uint32_t VL53L0X::getMeasurementTimingBudget() {
+    fn get_measurement_timing_budget(&mut self) -> Result<u32, E> {
+        let start_overhead: u32 = 1910;
+        let end_overhead: u32 = 960;
+        let msrc_overhead: u32 = 660;
+        let tcc_overhead: u32 = 590;
+        let dss_overhead: u32 = 690;
+        let pre_range_overhead: u32 = 660;
+        let final_range_overhead: u32 = 550;
+
+        let enables = self.get_sequence_step_enables()?;
+        let timeouts = self.get_sequence_step_timeouts(&enables)?;
+
+        // "Start and end overhead times always present"
+        let mut budget_microseconds = start_overhead + end_overhead;
+        if enables.tcc {
+            budget_microseconds += timeouts.msrc_dss_tcc_microseconds + tcc_overhead;
+        }
+        if enables.dss {
+            budget_microseconds += 2 * (timeouts.msrc_dss_tcc_microseconds + dss_overhead);
+        } else if enables.msrc {
+            budget_microseconds += timeouts.msrc_dss_tcc_microseconds + msrc_overhead;
+        }
+        if enables.pre_range {
+            budget_microseconds += timeouts.pre_range_microseconds + pre_range_overhead;
+        }
+        if enables.final_range {
+            budget_microseconds += timeouts.final_range_microseconds + final_range_overhead;
+        }
+
+        // store for internal reuse
+        Ok(budget_microseconds)
+    }
+
+    /// setMeasurementTimingBudget(budget_microseconds)
+    pub fn set_measurement_timing_budget(&mut self, budget_microseconds: u32) -> Result<bool, E> {
+        // note that these are different than values in get_
+        let start_overhead: u32 = 1320;
+        let end_overhead: u32 = 960;
+        let msrc_overhead: u32 = 660;
+        let tcc_overhead: u32 = 590;
+        let dss_overhead: u32 = 690;
+        let pre_range_overhead: u32 = 660;
+        let final_range_overhead: u32 = 550;
+        let min_timing_budget: u32 = 20000;
+
+        if budget_microseconds < min_timing_budget {
+            return Ok(false);
+        }
+
+        let enables = self.get_sequence_step_enables()?;
+        let timeouts = self.get_sequence_step_timeouts(&enables)?;
+
+        let mut use_budget_microseconds: u32 = (start_overhead + end_overhead) as u32;
+        if enables.tcc {
+            use_budget_microseconds += timeouts.msrc_dss_tcc_microseconds + tcc_overhead;
+        }
+        if enables.dss {
+            use_budget_microseconds += 2 * timeouts.msrc_dss_tcc_microseconds + dss_overhead;
+        } else if enables.msrc {
+            use_budget_microseconds += timeouts.msrc_dss_tcc_microseconds + msrc_overhead;
+        }
+        if enables.pre_range {
+            use_budget_microseconds += timeouts.pre_range_microseconds + pre_range_overhead;
+        }
+        if enables.final_range {
+            use_budget_microseconds += final_range_overhead;
+        }
+
+        // "Note that the final range timeout is determined by the timing
+        // budget and the sum of all other timeouts within the sequence.
+        // If there is no room for the final range timeout, then an error
+        // will be set. Otherwise the remaining time will be applied to
+        // the final range."
+
+        if use_budget_microseconds > budget_microseconds {
+            // "Requested timeout too small."
+            return Ok(false);
+        }
+
+        let final_range_timeout_microseconds: u32 = budget_microseconds - use_budget_microseconds;
+
+        // set_sequence_step_timeout() begin
+        // (SequenceStepId == VL53L0X_SEQUENCESTEP_FINAL_RANGE)
+        // "For the final range timeout, the pre-range timeout
+        // must be added. To do this both final and pre-range
+        // timeouts must be expressed in macro periods MClks
+        // because they have different vcsel periods."
+        let mut final_range_timeout_mclks: u16 = timeout_microseconds_to_mclks(
+            final_range_timeout_microseconds,
+            timeouts.final_range_vcsel_period_pclks,
+        ) as u16;
+
+        if enables.pre_range {
+            final_range_timeout_mclks += timeouts.pre_range_mclks;
+        }
+
+        self.write_16bit(
+            Register::FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI,
+            encode_timeout(final_range_timeout_mclks),
+        )?;
+
+        // set_sequence_step_timeout() end
+        // store for internal reuse
+        self.measurement_timing_budget_microseconds = budget_microseconds;
+        Ok(true)
     }
 
     /*
@@ -578,6 +754,74 @@ where
     */
 }
 
+struct SeqStepEnables {
+    tcc: bool,
+    dss: bool,
+    msrc: bool,
+    pre_range: bool,
+    final_range: bool,
+}
+
+struct SeqStepTimeouts {
+    pre_range_vcselperiod_pclks: u8,
+    final_range_vcsel_period_pclks: u8,
+    msrc_dss_tcc_mclks: u8,
+    pre_range_mclks: u16,
+    final_range_mclks: u16,
+    msrc_dss_tcc_microseconds: u32,
+    pre_range_microseconds: u32,
+    final_range_microseconds: u32,
+}
+
+fn decode_timeout(register_value: u16) -> u16 {
+    // format: "(LSByte * 2^MSByte) + 1"
+    ((register_value & 0x00FF) << (((register_value & 0xFF00) as u16) >> 8)) as u16 + 1
+}
+
+fn encode_timeout(timeout_mclks: u16) -> u16 {
+    if timeout_mclks == 0 {
+        return 0;
+    }
+    let mut ls_byte: u32;
+    let mut ms_byte: u16 = 0;
+
+    ls_byte = (timeout_mclks as u32) - 1;
+
+    while (ls_byte & 0xFFFFFF00) > 0 {
+        ls_byte >>= 1;
+        ms_byte += 1;
+    }
+
+    return (ms_byte << 8) | ((ls_byte & 0xFF) as u16);
+}
+
+fn calc_macro_period(vcsel_period_pclks: u8) -> u32 {
+    (((2304u32 * (vcsel_period_pclks as u32) * 1655u32) + 500u32) / 1000u32)
+}
+
+fn timeout_mclks_to_microseconds(timeout_period_mclks: u16, vcsel_period_pclks: u8) -> u32 {
+    let macro_period_nanoseconds: u32 = calc_macro_period(vcsel_period_pclks) as u32;
+    (((timeout_period_mclks as u32) * macro_period_nanoseconds) + (macro_period_nanoseconds / 2))
+        / 1000
+}
+
+fn timeout_microseconds_to_mclks(timeout_period_microseconds: u32, vcsel_period_pclks: u8) -> u32 {
+    let macro_period_nanoseconds: u32 = calc_macro_period(vcsel_period_pclks) as u32;
+
+    ((timeout_period_microseconds * 1000) + (macro_period_nanoseconds / 2))
+        / macro_period_nanoseconds
+}
+
+// Decode VCSEL (vertical cavity surface emitting laser) pulse period in PCLKs from register value based on VL53L0X_decode_vcsel_period()
+fn decode_vcsel_period(register_value: u8) -> u8 {
+    ((register_value) + 1) << 1
+}
+
+// Encode VCSEL pulse period register value from period in PCLKs based on VL53L0X_encode_vcsel_period()
+fn encode_vcsel_period(period_pclks: u8) -> u8 {
+    ((period_pclks) >> 1) - 1
+}
+
 #[allow(non_camel_case_types)]
 enum Register {
     SYSRANGE_START = 0x00,
@@ -598,4 +842,18 @@ enum Register {
     RESULT_RANGE_STATUS_plus_10 = 0x1e,
     OSC_CALIBRATE_VAL = 0xF8,
     SYSTEM_INTERMEASUREMENT_PERIOD = 0x04,
+    FINAL_RANGE_CONFIG_VCSEL_PERIOD = 0x70,
+    PRE_RANGE_CONFIG_VCSEL_PERIOD = 0x50,
+    PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI = 0x51,
+    PRE_RANGE_CONFIG_TIMEOUT_MACROP_LO = 0x52,
+    FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI = 0x71,
+    FINAL_RANGE_CONFIG_TIMEOUT_MACROP_LO = 0x72,
+    CROSSTALK_COMPENSATION_PEAK_RATE_MCPS = 0x20,
+    MSRC_CONFIG_TIMEOUT_MACROP = 0x46,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum VcselPeriodType {
+    VcselPeriodPreRange = 0,
+    VcselPeriodFinalRange = 1,
 }

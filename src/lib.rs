@@ -121,7 +121,8 @@ where
 
         {
             let buffer: &mut [u8] = &mut buffer;
-            const I2C_AUTO_INCREMENT: u8 = 1 << 7;
+            // const I2C_AUTO_INCREMENT: u8 = 1 << 7;
+            const I2C_AUTO_INCREMENT: u8 = 0;
             self.com
                 .write_read(ADDRESS, &[(reg as u8) | I2C_AUTO_INCREMENT], buffer)?;
         }
@@ -130,7 +131,7 @@ where
     }
 
     fn read_16bit(&mut self, reg: Register) -> Result<u16, E> {
-        let buffer: GenericArray<u8, U6> = self.read_registers(reg)?;
+        let buffer: GenericArray<u8, U2> = self.read_registers(reg)?;
         Ok((u16(buffer[0]) << 8) + u16(buffer[1]))
     }
 
@@ -314,7 +315,6 @@ where
                 return Err(Error::Timeout);
             }
         }
-
         self.read_range_continuous_millimeters()
     }
 

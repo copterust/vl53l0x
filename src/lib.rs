@@ -8,6 +8,7 @@
 extern crate cast;
 extern crate embedded_hal as ehal;
 extern crate generic_array;
+extern crate nb;
 
 use core::mem;
 
@@ -278,8 +279,30 @@ where
         Ok(())
     }
 
-    /// readRangeContinuousMillimeters
-    pub fn read_range_continuous_millimeters(&mut self) -> Result<u16, Error<E>> {
+    /// reads and returns range measurement or nb::Error::WouldBlock if it's not ready yet
+    pub fn read_range_mm(&mut self) -> nb::Result<u16, Error<E>> {
+        match self.read_register(Register::RESULT_INTERRUPT_STATUS) {
+            Ok(r) => {
+                if (r & 0x07) == 0 {
+                    Err(nb::Error::WouldBlock)
+                } else {
+                    let range_err = self.read_16bit(Register::RESULT_RANGE_STATUS_plus_10);
+                    let write_err = self.write_register(Register::SYSTEM_INTERRUPT_CLEAR, 0x01);
+                    match (range_err, write_err) {
+                        (Ok(res), Ok(_)) => Ok(res),
+                        (Err(e), _) => Err(nb::Error::Other(Error::from(e))),
+                        (_, Err(e)) => Err(nb::Error::Other(Error::from(e))),
+                    }
+                }
+            },
+            Err(e) => {
+                Err(nb::Error::Other(Error::from(e)))
+            }
+        }
+    }
+
+    /// readRangeContinuousMillimeters (blocking)
+    pub fn read_range_continuous_millimeters_blocking(&mut self) -> Result<u16, Error<E>> {
         let mut c = 0;
         while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07) == 0 {
             c += 1;
@@ -294,8 +317,8 @@ where
         Ok(range_err?)
     }
 
-    /// readRangeSingleMillimeters
-    pub fn read_range_single_millimeters(&mut self) -> Result<u16, Error<E>> {
+    /// readRangeSingleMillimeters (blocking)
+    pub fn read_range_single_millimeters_blocking(&mut self) -> Result<u16, Error<E>> {
         self.write_byte(0x80, 0x01)?;
         self.write_byte(0xFF, 0x01)?;
         self.write_byte(0x00, 0x00)?;
@@ -315,7 +338,7 @@ where
                 return Err(Error::Timeout);
             }
         }
-        self.read_range_continuous_millimeters()
+        self.read_range_continuous_millimeters_blocking()
     }
 
     // performSingleRefCalibration(uint8_t vhvInitByte)

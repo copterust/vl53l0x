@@ -1,6 +1,6 @@
 # `vl53l0x`
 
-> no_std driver for the vl53l0x (accelerometer + magnetometer/compass).
+> no_std driver for the vl53l0x (Time-of-Flight (ToF) ranging sensor).
 
 [![Build Status](https://travis-ci.org/copterust/vl53l0x.svg?branch=master)](https://travis-ci.org/copterust/vl53l0x)
 

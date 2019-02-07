@@ -1,6 +1,6 @@
 # `vl53l0x`
 
-> no_std driver for the vl53l0x (accelerometer + magnetometer/compass).
+> no_std driver for the vl53l0x [vl53l0x](https://www.st.com/resource/en/datasheet/vl53l0x.pdf) (Time of Flight IR distance sensor).
 
 [![Build Status](https://travis-ci.org/copterust/vl53l0x.svg?branch=master)](https://travis-ci.org/copterust/vl53l0x)
 

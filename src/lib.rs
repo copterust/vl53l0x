@@ -1,4 +1,4 @@
-//! Dummy
+//! vl53l0x --https://www.st.com/resource/en/datasheet/vl53l0x.pdf -- Time of Flight IR distance sensor.
 
 #![deny(missing_docs)]
 #![deny(warnings)]
@@ -294,10 +294,8 @@ where
                         (_, Err(e)) => Err(nb::Error::Other(Error::from(e))),
                     }
                 }
-            },
-            Err(e) => {
-                Err(nb::Error::Other(Error::from(e)))
             }
+            Err(e) => Err(nb::Error::Other(Error::from(e))),
         }
     }
 

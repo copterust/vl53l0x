@@ -7,7 +7,7 @@ keywords = ["embedded-hal-driver", "range", "time-fo-flight", "distance"]
 license = "MIT"
 name = "vl53l0x"
 repository = "https://github.com/copterust/vl53l0x"
-version = "0.2.2"
+version = "0.2.3-alpha.0"
 
 [dependencies]
 embedded-hal = "0.2.1"

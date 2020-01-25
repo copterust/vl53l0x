@@ -5,9 +5,9 @@
 #![allow(dead_code)]
 #![no_std]
 
-use nb;
 use cast::u16;
 use hal::blocking::i2c::{Write, WriteRead};
+use nb;
 
 const ADDRESS: u8 = 0x29;
 
@@ -103,12 +103,18 @@ where
         Ok(ret)
     }
 
-    fn read_registers(&mut self, reg: Register, buffer: &mut [u8]) -> Result<(), E> {
+    fn read_registers(
+        &mut self,
+        reg: Register,
+        buffer: &mut [u8],
+    ) -> Result<(), E> {
         // const I2C_AUTO_INCREMENT: u8 = 1 << 7;
         const I2C_AUTO_INCREMENT: u8 = 0;
-        self.com.write_read(ADDRESS,
-                            &[(reg as u8) | I2C_AUTO_INCREMENT],
-                            buffer)?;
+        self.com.write_read(
+            ADDRESS,
+            &[(reg as u8) | I2C_AUTO_INCREMENT],
+            buffer,
+        )?;
 
         Ok(())
     }
@@ -135,7 +141,8 @@ where
         self.com.write_read(
             ADDRESS,
             &[
-                reg as u8, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+                reg as u8, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4],
+                bytes[5],
             ],
             &mut buf,
         )
@@ -230,13 +237,17 @@ where
         if period_millis != 0 {
             // continuous timed mode
             // VL53L0X_SetInterMeasurementPeriodMilliSeconds() begin
-            let osc_calibrate_value = self.read_16bit(Register::OSC_CALIBRATE_VAL)?;
+            let osc_calibrate_value =
+                self.read_16bit(Register::OSC_CALIBRATE_VAL)?;
 
             if osc_calibrate_value != 0 {
                 period_millis *= osc_calibrate_value as u32;
             }
 
-            self.write_32bit(Register::SYSTEM_INTERMEASUREMENT_PERIOD, period_millis)?;
+            self.write_32bit(
+                Register::SYSTEM_INTERMEASUREMENT_PERIOD,
+                period_millis,
+            )?;
             // VL53L0X_SetInterMeasurementPeriodMilliSeconds() end
             // VL53L0X_REG_SYSRANGE_MODE_TIMED
             self.write_register(Register::SYSRANGE_START, 0x04)?;
@@ -269,8 +280,10 @@ where
                 if (r & 0x07) == 0 {
                     Err(nb::Error::WouldBlock)
                 } else {
-                    let range_err = self.read_16bit(Register::RESULT_RANGE_STATUS_plus_10);
-                    let write_err = self.write_register(Register::SYSTEM_INTERRUPT_CLEAR, 0x01);
+                    let range_err =
+                        self.read_16bit(Register::RESULT_RANGE_STATUS_plus_10);
+                    let write_err = self
+                        .write_register(Register::SYSTEM_INTERRUPT_CLEAR, 0x01);
                     match (range_err, write_err) {
                         (Ok(res), Ok(_)) => Ok(res),
                         (Err(e), _) => Err(nb::Error::Other(Error::from(e))),
@@ -283,9 +296,13 @@ where
     }
 
     /// readRangeContinuousMillimeters (blocking)
-    pub fn read_range_continuous_millimeters_blocking(&mut self) -> Result<u16, Error<E>> {
+    pub fn read_range_continuous_millimeters_blocking(
+        &mut self,
+    ) -> Result<u16, Error<E>> {
         let mut c = 0;
-        while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07) == 0 {
+        while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07)
+            == 0
+        {
             c += 1;
             if c == 10000 {
                 return Err(Error::Timeout);
@@ -299,7 +316,9 @@ where
     }
 
     /// readRangeSingleMillimeters (blocking)
-    pub fn read_range_single_millimeters_blocking(&mut self) -> Result<u16, Error<E>> {
+    pub fn read_range_single_millimeters_blocking(
+        &mut self,
+    ) -> Result<u16, Error<E>> {
         self.write_byte(0x80, 0x01)?;
         self.write_byte(0xFF, 0x01)?;
         self.write_byte(0x00, 0x00)?;
@@ -323,11 +342,16 @@ where
     }
 
     // performSingleRefCalibration(uint8_t vhvInitByte)
-    fn perform_single_ref_calibration(&mut self, vhv_init_byte: u8) -> Result<(), Error<E>> {
+    fn perform_single_ref_calibration(
+        &mut self,
+        vhv_init_byte: u8,
+    ) -> Result<(), Error<E>> {
         // VL53L0X_REG_SYSRANGE_MODE_START_STOP
         self.write_register(Register::SYSRANGE_START, 0x01 | vhv_init_byte)?;
         let mut c = 0;
-        while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07) == 0 {
+        while (self.read_register(Register::RESULT_INTERRUPT_STATUS)? & 0x07)
+            == 0
+        {
             c += 1;
             if c == 10000 {
                 return Err(Error::Timeout);
@@ -348,7 +372,8 @@ where
         // Sensor uses 1V8 mode for I/O by default; switch to 2V8 mode if necessary
         if self.io_mode2v8 {
             // set bit 0
-            let ext_sup_hv = self.read_register(Register::VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV)?;
+            let ext_sup_hv = self
+                .read_register(Register::VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV)?;
             self.write_register(
                 Register::VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV,
                 ext_sup_hv | 0x01,
@@ -383,18 +408,23 @@ where
 
         // The SPAD map (RefGoodSpadMap) is read by VL53L0X_get_info_from_device() in the API,
         // but the same data seems to be more easily readable from GLOBAL_CONFIG_SPAD_ENABLES_REF_0 through _6, so read it from there
-        let mut ref_spad_map = self.read_6bytes(Register::GLOBAL_CONFIG_SPAD_ENABLES_REF_0)?;
+        let mut ref_spad_map =
+            self.read_6bytes(Register::GLOBAL_CONFIG_SPAD_ENABLES_REF_0)?;
 
         // -- VL53L0X_set_reference_spads() begin (assume NVM values are valid)
 
         self.write_byte(0xFF, 0x01)?;
         self.write_register(Register::DYNAMIC_SPAD_REF_EN_START_OFFSET, 0x00)?;
-        self.write_register(Register::DYNAMIC_SPAD_NUM_REQUESTED_REF_SPAD, 0x2C)?;
+        self.write_register(
+            Register::DYNAMIC_SPAD_NUM_REQUESTED_REF_SPAD,
+            0x2C,
+        )?;
         self.write_byte(0xFF, 0x00)?;
         self.write_register(Register::GLOBAL_CONFIG_REF_EN_START_SELECT, 0xB4)?;
 
         // 12 is the first aperture spad
-        let first_spad_to_enable = if spad_type_is_aperture != 0 { 12 } else { 0 };
+        let first_spad_to_enable =
+            if spad_type_is_aperture != 0 { 12 } else { 0 };
         let mut spads_enabled: u8 = 0;
 
         for i in 0..48 {
@@ -406,7 +436,10 @@ where
             }
         }
 
-        self.write_6bytes(Register::GLOBAL_CONFIG_SPAD_ENABLES_REF_0, ref_spad_map)?;
+        self.write_6bytes(
+            Register::GLOBAL_CONFIG_SPAD_ENABLES_REF_0,
+            ref_spad_map,
+        )?;
 
         // -- VL53L0X_set_reference_spads() end
 
@@ -523,7 +556,8 @@ where
         // MSRC = Minimum Signal Rate Check
         // TCC = Target CentreCheck
         // -- VL53L0X_SetSequenceStepEnable() begin
-        self.measurement_timing_budget_microseconds = self.get_measurement_timing_budget()?;
+        self.measurement_timing_budget_microseconds =
+            self.get_measurement_timing_budget()?;
         self.write_register(Register::SYSTEM_SEQUENCE_CONFIG, 0xE8)?;
 
         // -- VL53L0X_SetSequenceStepEnable() end
@@ -573,7 +607,8 @@ where
 
     // getSequenceStepEnables(VL53L0XSequenceStepEnables* enables) {
     fn get_sequence_step_enables(&mut self) -> Result<SeqStepEnables, E> {
-        let sequence_config: u8 = self.read_register(Register::SYSTEM_SEQUENCE_CONFIG)?;
+        let sequence_config: u8 =
+            self.read_register(Register::SYSTEM_SEQUENCE_CONFIG)?;
         Ok(SeqStepEnables {
             tcc: ((sequence_config >> 4) & 0x1) == 1,
             dss: ((sequence_config >> 3) & 0x1) == 1,
@@ -588,18 +623,21 @@ where
         &mut self,
         enables: &SeqStepEnables,
     ) -> Result<SeqStepTimeouts, E> {
-        let pre_range_mclks =
-            decode_timeout(self.read_16bit(Register::PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI)?);
-        let mut final_range_mclks =
-            decode_timeout(self.read_16bit(Register::FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI)?);
+        let pre_range_mclks = decode_timeout(
+            self.read_16bit(Register::PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI)?,
+        );
+        let mut final_range_mclks = decode_timeout(
+            self.read_16bit(Register::FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI)?,
+        );
         if enables.pre_range {
             final_range_mclks -= pre_range_mclks;
         };
         let pre_range_vcselperiod_pclks =
             self.get_vcsel_pulse_period(VcselPeriodType::VcselPeriodPreRange)?;
-        let msrc_dss_tcc_mclks = self.read_register(Register::MSRC_CONFIG_TIMEOUT_MACROP)? + 1;
-        let final_range_vcsel_period_pclks =
-            self.get_vcsel_pulse_period(VcselPeriodType::VcselPeriodFinalRange)?;
+        let msrc_dss_tcc_mclks =
+            self.read_register(Register::MSRC_CONFIG_TIMEOUT_MACROP)? + 1;
+        let final_range_vcsel_period_pclks = self
+            .get_vcsel_pulse_period(VcselPeriodType::VcselPeriodFinalRange)?;
         Ok(SeqStepTimeouts {
             pre_range_vcselperiod_pclks,
             msrc_dss_tcc_mclks,
@@ -637,18 +675,23 @@ where
         // "Start and end overhead times always present"
         let mut budget_microseconds = start_overhead + end_overhead;
         if enables.tcc {
-            budget_microseconds += timeouts.msrc_dss_tcc_microseconds + tcc_overhead;
+            budget_microseconds +=
+                timeouts.msrc_dss_tcc_microseconds + tcc_overhead;
         }
         if enables.dss {
-            budget_microseconds += 2 * (timeouts.msrc_dss_tcc_microseconds + dss_overhead);
+            budget_microseconds +=
+                2 * (timeouts.msrc_dss_tcc_microseconds + dss_overhead);
         } else if enables.msrc {
-            budget_microseconds += timeouts.msrc_dss_tcc_microseconds + msrc_overhead;
+            budget_microseconds +=
+                timeouts.msrc_dss_tcc_microseconds + msrc_overhead;
         }
         if enables.pre_range {
-            budget_microseconds += timeouts.pre_range_microseconds + pre_range_overhead;
+            budget_microseconds +=
+                timeouts.pre_range_microseconds + pre_range_overhead;
         }
         if enables.final_range {
-            budget_microseconds += timeouts.final_range_microseconds + final_range_overhead;
+            budget_microseconds +=
+                timeouts.final_range_microseconds + final_range_overhead;
         }
 
         // store for internal reuse
@@ -656,7 +699,10 @@ where
     }
 
     /// setMeasurementTimingBudget(budget_microseconds)
-    pub fn set_measurement_timing_budget(&mut self, budget_microseconds: u32) -> Result<bool, E> {
+    pub fn set_measurement_timing_budget(
+        &mut self,
+        budget_microseconds: u32,
+    ) -> Result<bool, E> {
         // note that these are different than values in get_
         let start_overhead: u32 = 1320;
         let end_overhead: u32 = 960;
@@ -674,17 +720,22 @@ where
         let enables = self.get_sequence_step_enables()?;
         let timeouts = self.get_sequence_step_timeouts(&enables)?;
 
-        let mut use_budget_microseconds: u32 = (start_overhead + end_overhead) as u32;
+        let mut use_budget_microseconds: u32 =
+            (start_overhead + end_overhead) as u32;
         if enables.tcc {
-            use_budget_microseconds += timeouts.msrc_dss_tcc_microseconds + tcc_overhead;
+            use_budget_microseconds +=
+                timeouts.msrc_dss_tcc_microseconds + tcc_overhead;
         }
         if enables.dss {
-            use_budget_microseconds += 2 * timeouts.msrc_dss_tcc_microseconds + dss_overhead;
+            use_budget_microseconds +=
+                2 * timeouts.msrc_dss_tcc_microseconds + dss_overhead;
         } else if enables.msrc {
-            use_budget_microseconds += timeouts.msrc_dss_tcc_microseconds + msrc_overhead;
+            use_budget_microseconds +=
+                timeouts.msrc_dss_tcc_microseconds + msrc_overhead;
         }
         if enables.pre_range {
-            use_budget_microseconds += timeouts.pre_range_microseconds + pre_range_overhead;
+            use_budget_microseconds +=
+                timeouts.pre_range_microseconds + pre_range_overhead;
         }
         if enables.final_range {
             use_budget_microseconds += final_range_overhead;
@@ -701,7 +752,8 @@ where
             return Ok(false);
         }
 
-        let final_range_timeout_microseconds: u32 = budget_microseconds - use_budget_microseconds;
+        let final_range_timeout_microseconds: u32 =
+            budget_microseconds - use_budget_microseconds;
 
         // set_sequence_step_timeout() begin
         // (SequenceStepId == VL53L0X_SEQUENCESTEP_FINAL_RANGE)
@@ -779,7 +831,9 @@ struct SeqStepTimeouts {
 
 fn decode_timeout(register_value: u16) -> u16 {
     // format: "(LSByte * 2^MSByte) + 1"
-    ((register_value & 0x00FF) << (((register_value & 0xFF00) as u16) >> 8)) as u16 + 1
+    ((register_value & 0x00FF) << (((register_value & 0xFF00) as u16) >> 8))
+        as u16
+        + 1
 }
 
 fn encode_timeout(timeout_mclks: u16) -> u16 {
@@ -803,14 +857,23 @@ fn calc_macro_period(vcsel_period_pclks: u8) -> u32 {
     ((2304u32 * (vcsel_period_pclks as u32) * 1655u32) + 500u32) / 1000u32
 }
 
-fn timeout_mclks_to_microseconds(timeout_period_mclks: u16, vcsel_period_pclks: u8) -> u32 {
-    let macro_period_nanoseconds: u32 = calc_macro_period(vcsel_period_pclks) as u32;
-    (((timeout_period_mclks as u32) * macro_period_nanoseconds) + (macro_period_nanoseconds / 2))
+fn timeout_mclks_to_microseconds(
+    timeout_period_mclks: u16,
+    vcsel_period_pclks: u8,
+) -> u32 {
+    let macro_period_nanoseconds: u32 =
+        calc_macro_period(vcsel_period_pclks) as u32;
+    (((timeout_period_mclks as u32) * macro_period_nanoseconds)
+        + (macro_period_nanoseconds / 2))
         / 1000
 }
 
-fn timeout_microseconds_to_mclks(timeout_period_microseconds: u32, vcsel_period_pclks: u8) -> u32 {
-    let macro_period_nanoseconds: u32 = calc_macro_period(vcsel_period_pclks) as u32;
+fn timeout_microseconds_to_mclks(
+    timeout_period_microseconds: u32,
+    vcsel_period_pclks: u8,
+) -> u32 {
+    let macro_period_nanoseconds: u32 =
+        calc_macro_period(vcsel_period_pclks) as u32;
 
     ((timeout_period_microseconds * 1000) + (macro_period_nanoseconds / 2))
         / macro_period_nanoseconds

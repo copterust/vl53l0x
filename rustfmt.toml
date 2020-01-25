@@ -1,0 +1,4 @@
+edition = "2018"
+comment_width = 80
+max_width = 80
+tab_spaces = 4

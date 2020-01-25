@@ -7,16 +7,11 @@
 
 extern crate cast;
 extern crate embedded_hal as ehal;
-extern crate generic_array;
 extern crate nb;
-
-use core::mem;
 
 use cast::u16;
 
 use ehal::blocking::i2c::{Write, WriteRead};
-use generic_array::typenum::consts::*;
-use generic_array::{ArrayLength, GenericArray};
 
 const ADDRESS: u8 = 0x29;
 
@@ -106,33 +101,25 @@ where
     }
 
     fn read_6bytes(&mut self, reg: Register) -> Result<[u8; 6], E> {
-        let buffer: GenericArray<u8, U6> = self.read_registers(reg)?;
-        // XXX: copy!
         let mut ret: [u8; 6] = Default::default();
-        ret.copy_from_slice(buffer.as_slice());
+        self.read_registers(reg, &mut ret)?;
 
         Ok(ret)
     }
 
-    fn read_registers<N>(&mut self, reg: Register) -> Result<GenericArray<u8, N>, E>
-    where
-        N: ArrayLength<u8>,
-    {
-        let mut buffer: GenericArray<u8, N> = unsafe { mem::uninitialized() };
+    fn read_registers(&mut self, reg: Register, buffer: &mut [u8]) -> Result<(), E> {
+        // const I2C_AUTO_INCREMENT: u8 = 1 << 7;
+        const I2C_AUTO_INCREMENT: u8 = 0;
+        self.com.write_read(ADDRESS,
+                            &[(reg as u8) | I2C_AUTO_INCREMENT],
+                            buffer)?;
 
-        {
-            let buffer: &mut [u8] = &mut buffer;
-            // const I2C_AUTO_INCREMENT: u8 = 1 << 7;
-            const I2C_AUTO_INCREMENT: u8 = 0;
-            self.com
-                .write_read(ADDRESS, &[(reg as u8) | I2C_AUTO_INCREMENT], buffer)?;
-        }
-
-        Ok(buffer)
+        Ok(())
     }
 
     fn read_16bit(&mut self, reg: Register) -> Result<u16, E> {
-        let buffer: GenericArray<u8, U2> = self.read_registers(reg)?;
+        let mut buffer: [u8; 2] = [0, 0];
+        self.read_registers(reg, &mut buffer)?;
         Ok((u16(buffer[0]) << 8) + u16(buffer[1]))
     }
 
@@ -817,7 +804,7 @@ fn encode_timeout(timeout_mclks: u16) -> u16 {
 }
 
 fn calc_macro_period(vcsel_period_pclks: u8) -> u32 {
-    (((2304u32 * (vcsel_period_pclks as u32) * 1655u32) + 500u32) / 1000u32)
+    ((2304u32 * (vcsel_period_pclks as u32) * 1655u32) + 500u32) / 1000u32
 }
 
 fn timeout_mclks_to_microseconds(timeout_period_mclks: u16, vcsel_period_pclks: u8) -> u32 {

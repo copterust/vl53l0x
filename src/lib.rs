@@ -5,18 +5,14 @@
 #![allow(dead_code)]
 #![no_std]
 
-extern crate cast;
-extern crate embedded_hal as ehal;
-extern crate nb;
-
+use nb;
 use cast::u16;
-
-use ehal::blocking::i2c::{Write, WriteRead};
+use hal::blocking::i2c::{Write, WriteRead};
 
 const ADDRESS: u8 = 0x29;
 
 /// dummy
-pub struct VL53L0x<I2C: ehal::blocking::i2c::WriteRead> {
+pub struct VL53L0x<I2C: hal::blocking::i2c::WriteRead> {
     com: I2C,
     /// dummy
     pub revision_id: u8,
@@ -49,7 +45,7 @@ where
     /// Dummy.
     pub fn new(i2c: I2C) -> Result<VL53L0x<I2C>, Error<E>>
     where
-        I2C: ehal::blocking::i2c::WriteRead<Error = E>,
+        I2C: hal::blocking::i2c::WriteRead<Error = E>,
     {
         let mut chip = VL53L0x {
             com: i2c,

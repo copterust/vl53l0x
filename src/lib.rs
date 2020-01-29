@@ -172,8 +172,11 @@ where
         let v2 = ((word >> 8) & 0xFF) as u8;
         let v3 = ((word >> 16) & 0xFF) as u8;
         let v4 = ((word >> 24) & 0xFF) as u8;
-        self.com
-            .write_read(self.address, &[reg as u8, v1, v2, v3, v4], &mut buffer)
+        self.com.write_read(
+            self.address,
+            &[reg as u8, v1, v2, v3, v4],
+            &mut buffer,
+        )
     }
 
     fn set_signal_rate_limit(&mut self, limit: f32) -> Result<bool, E> {

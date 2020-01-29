@@ -9,7 +9,7 @@ use cast::u16;
 use hal::blocking::i2c::{Write, WriteRead};
 use nb;
 
-const ADDRESS: u8 = 0x29;
+const DEFAULT_ADDRESS: u8 = 0x29;
 
 /// dummy
 pub struct VL53L0x<I2C: hal::blocking::i2c::WriteRead> {
@@ -19,6 +19,7 @@ pub struct VL53L0x<I2C: hal::blocking::i2c::WriteRead> {
     io_mode2v8: bool,
     stop_variable: u8,
     measurement_timing_budget_microseconds: u32,
+    address: u8,
 }
 
 /// MPU Error
@@ -42,8 +43,16 @@ impl<I2C, E> VL53L0x<I2C>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
 {
-    /// Dummy.
+    /// Creates new driver with default address.
     pub fn new(i2c: I2C) -> Result<VL53L0x<I2C>, Error<E>>
+    where
+        I2C: hal::blocking::i2c::WriteRead<Error = E>,
+    {
+        VL53L0x::with_address(i2c, DEFAULT_ADDRESS)
+    }
+
+    /// Creates new driver with given address.
+    pub fn with_address(i2c: I2C, address: u8) -> Result<VL53L0x<I2C>, Error<E>>
     where
         I2C: hal::blocking::i2c::WriteRead<Error = E>,
     {
@@ -53,6 +62,7 @@ where
             io_mode2v8: true,
             stop_variable: 0,
             measurement_timing_budget_microseconds: 0,
+            address,
         };
 
         let wai = chip.who_am_i()?;
@@ -83,7 +93,7 @@ where
         // FIXME:
         //  * device address is not a const
         //  * register address is u16
-        self.com.write_read(ADDRESS, &[reg as u8], &mut data)?;
+        self.com.write_read(self.address, &[reg as u8], &mut data)?;
         Ok(data[0])
     }
 
@@ -92,7 +102,7 @@ where
         // FIXME:
         //  * device address is not a const
         //  * register address is u16
-        self.com.write_read(ADDRESS, &[reg], &mut data)?;
+        self.com.write_read(self.address, &[reg], &mut data)?;
         Ok(data[0])
     }
 
@@ -111,7 +121,7 @@ where
         // const I2C_AUTO_INCREMENT: u8 = 1 << 7;
         const I2C_AUTO_INCREMENT: u8 = 0;
         self.com.write_read(
-            ADDRESS,
+            self.address,
             &[(reg as u8) | I2C_AUTO_INCREMENT],
             buffer,
         )?;
@@ -127,19 +137,19 @@ where
 
     fn write_byte(&mut self, reg: u8, byte: u8) -> Result<(), E> {
         let mut buffer = [0];
-        self.com.write_read(ADDRESS, &[reg, byte], &mut buffer)
+        self.com.write_read(self.address, &[reg, byte], &mut buffer)
     }
 
     fn write_register(&mut self, reg: Register, byte: u8) -> Result<(), E> {
         let mut buffer = [0];
         self.com
-            .write_read(ADDRESS, &[reg as u8, byte], &mut buffer)
+            .write_read(self.address, &[reg as u8, byte], &mut buffer)
     }
 
     fn write_6bytes(&mut self, reg: Register, bytes: [u8; 6]) -> Result<(), E> {
         let mut buf: [u8; 6] = [0, 0, 0, 0, 0, 0];
         self.com.write_read(
-            ADDRESS,
+            self.address,
             &[
                 reg as u8, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4],
                 bytes[5],
@@ -153,7 +163,7 @@ where
         let msb = (word >> 8) as u8;
         let lsb = (word & 0xFF) as u8;
         self.com
-            .write_read(ADDRESS, &[reg as u8, msb, lsb], &mut buffer)
+            .write_read(self.address, &[reg as u8, msb, lsb], &mut buffer)
     }
 
     fn write_32bit(&mut self, reg: Register, word: u32) -> Result<(), E> {
@@ -163,7 +173,7 @@ where
         let v3 = ((word >> 16) & 0xFF) as u8;
         let v4 = ((word >> 24) & 0xFF) as u8;
         self.com
-            .write_read(ADDRESS, &[reg as u8, v1, v2, v3, v4], &mut buffer)
+            .write_read(self.address, &[reg as u8, v1, v2, v3, v4], &mut buffer)
     }
 
     fn set_signal_rate_limit(&mut self, limit: f32) -> Result<bool, E> {

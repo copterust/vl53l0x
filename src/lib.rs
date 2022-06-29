@@ -31,6 +31,10 @@ pub enum Error<E> {
     BusError(E),
     /// Timeout
     Timeout,
+    /// I2C address not valid, needs to be between 0x08 and 0x77.
+    /// It is a 7 bit address thus the range is 0x00 - 0x7F but
+    /// 0x00 - 0x07 and 0x78 - 0x7F are reserved I2C addresses and cannot be used.
+    InvalidAddress(u8),
 }
 
 impl<E> core::convert::From<E> for Error<E> {
@@ -80,6 +84,23 @@ where
         } else {
             Err(Error::InvalidDevice(wai))
         }
+    }
+
+    /// Changes the I2C address of the sensor.
+    /// Note that the address resets when the device is powered off.
+    /// Only allows values between 0x08 and 0x77 as the device uses a 7 bit address and
+    /// 0x00 - 0x07 and 0x78 - 0x7F are reserved
+    pub fn set_address(&mut self, new_address: u8) -> Result<(), Error<E>> {
+        if new_address < 0x08 || new_address > 0x77 {
+            return Err(Error::InvalidAddress(new_address));
+        }
+        self.com.write(
+            self.address,
+            &[Register::I2C_SLAVE_DEVICE_ADDRESS as u8, new_address],
+        )?;
+        self.address = new_address;
+
+        Ok(())
     }
 
     fn power_on(&mut self) -> Result<(), E> {
@@ -930,6 +951,7 @@ enum Register {
     FINAL_RANGE_CONFIG_TIMEOUT_MACROP_LO = 0x72,
     CROSSTALK_COMPENSATION_PEAK_RATE_MCPS = 0x20,
     MSRC_CONFIG_TIMEOUT_MACROP = 0x46,
+    I2C_SLAVE_DEVICE_ADDRESS = 0x8A,
 }
 
 #[derive(Debug, Copy, Clone)]

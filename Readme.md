@@ -26,13 +26,15 @@ version = "<version>"
 Use embedded-hal implementation to get I2C handle and delay then create vl53l0x handle:
 
 ```rust
-extern crate vl53l0x; // or just use vl53l0x; if 2018 edition is used.
+use vl53l0x;
 
-// to create sensor with default configuration:
-let mut lsm = VL53L0X::default(l2c, &mut delay)?;
-// to get all supported measurements:
-let all = marg.all()?;
-println!("{:?}", all);
+// to create sensor with i2c:
+
+let mut tof = vl53l0x::VL53L0x::new(i2c).expect("tof");
+tof.set_measurement_timing_budget(200000).expect("time budget");
+tof.start_continuous(0).expect("start");
+let mls = tof.read_range_continuous_millimeters();
+println!("{}", mls);
 ```
 
 ## More examples

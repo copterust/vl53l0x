@@ -4,27 +4,30 @@
 #![deny(warnings)]
 #![allow(dead_code)]
 #![no_std]
+#![allow(unused_imports)]
 
-use cast::u16;
-use hal::blocking::i2c::{Write, WriteRead};
+use core::any::TypeId;
+
+use hal::blocking::i2c::{Write, WriteRead, AddressMode, SevenBitAddress, TenBitAddress};
 use nb;
 
 const DEFAULT_ADDRESS: u8 = 0x29;
 
 /// dummy
-pub struct VL53L0x<I2C: hal::blocking::i2c::WriteRead> {
+pub struct VL53L0x<I2C: hal::blocking::i2c::WriteRead<A>,
+                   A: AddressMode = SevenBitAddress> {
     com: I2C,
     /// dummy
     pub revision_id: u8,
     io_mode2v8: bool,
     stop_variable: u8,
     measurement_timing_budget_microseconds: u32,
-    address: u8,
+    address: A,
 }
 
 /// MPU Error
 #[derive(Debug, Copy, Clone)]
-pub enum Error<E> {
+pub enum Error<E, A: AddressMode = SevenBitAddress> {
     /// WHO_AM_I returned invalid value (returned value is argument).
     InvalidDevice(u8),
     /// Underlying bus error.
@@ -34,18 +37,74 @@ pub enum Error<E> {
     /// I2C address not valid, needs to be between 0x08 and 0x77.
     /// It is a 7 bit address thus the range is 0x00 - 0x7F but
     /// 0x00 - 0x07 and 0x78 - 0x7F are reserved I2C addresses and cannot be used.
-    InvalidAddress(u8),
+    InvalidAddress(A),
 }
 
-impl<E> core::convert::From<E> for Error<E> {
+impl<E, A:AddressMode> core::convert::From<E> for Error<E, A> {
     fn from(error: E) -> Self {
         Error::BusError(error)
     }
 }
 
-impl<I2C, E> VL53L0x<I2C>
+
+impl<I2C, E> VL53L0x<I2C, TenBitAddress>
 where
-    I2C: WriteRead<Error = E> + Write<Error = E>,
+    I2C: WriteRead<TenBitAddress, Error = E> + Write<TenBitAddress, Error = E>,
+{
+    /// Changes the I2C address of the sensor.
+    /// Note that the address resets when the device is powered off.
+    /// Only allows values between 0x00 to 0x3ff.
+    /// 10-bit addressing was designed to be compatible with 7-bit
+    /// addressing, allowing developers to mix two types of devices on a single bus.
+    /// When communicating with a 10-bit addressed device, the special reserved address is used to indicate that 10-bit addressing is being used.
+    pub fn set_address(&mut self, new_address: u16) -> Result<(), Error<E, TenBitAddress>> {
+        if new_address > 0x3ff {
+            return Err(Error::InvalidAddress(new_address));
+        }
+
+        let addr_hi: u8 = (0xF0 | ((new_address >> 7) & 0x6)) as u8;
+        let addr_lo: u8 = (new_address & 0xFF) as u8;
+
+        self.com.write(
+            self.address,
+            &[Register::I2C_SLAVE_DEVICE_ADDRESS as u8,
+              addr_hi,
+              addr_lo],
+        )?;
+        self.address = new_address;
+
+        Ok(())
+    }
+}
+
+
+impl<I2C, E> VL53L0x<I2C, SevenBitAddress>
+where
+    I2C: WriteRead<SevenBitAddress, Error = E> + Write<Error = E>,
+{
+    /// Changes the I2C address of the sensor.
+    /// Note that the address resets when the device is powered off.
+    /// Only allows values between 0x08 and 0x77 as the device uses a 7 bit address and
+    /// 0x00 - 0x07 and 0x78 - 0x7F are reserved
+    pub fn set_address(&mut self, new_address: u8) -> Result<(), Error<E>> {
+        if new_address < 0x08 || new_address > 0x77 {
+            return Err(Error::InvalidAddress(new_address));
+        }
+        self.com.write(
+            self.address,
+            &[Register::I2C_SLAVE_DEVICE_ADDRESS as u8, new_address],
+        )?;
+        self.address = new_address;
+
+        Ok(())
+    }
+}
+
+
+impl<I2C, E, A> VL53L0x<I2C, A>
+where
+    A: AddressMode + Copy,
+    I2C: WriteRead<A, Error = E> + Write<Error = E>,
 {
     /// Creates new driver with default address.
     pub fn new(i2c: I2C) -> Result<VL53L0x<I2C>, Error<E>>
@@ -56,7 +115,7 @@ where
     }
 
     /// Creates new driver with given address.
-    pub fn with_address(i2c: I2C, address: u8) -> Result<VL53L0x<I2C>, Error<E>>
+    pub fn with_address(i2c: I2C, address: A) -> Result<VL53L0x<I2C, A>, Error<E>>
     where
         I2C: hal::blocking::i2c::WriteRead<Error = E>,
     {
@@ -86,23 +145,6 @@ where
         }
     }
 
-    /// Changes the I2C address of the sensor.
-    /// Note that the address resets when the device is powered off.
-    /// Only allows values between 0x08 and 0x77 as the device uses a 7 bit address and
-    /// 0x00 - 0x07 and 0x78 - 0x7F are reserved
-    pub fn set_address(&mut self, new_address: u8) -> Result<(), Error<E>> {
-        if new_address < 0x08 || new_address > 0x77 {
-            return Err(Error::InvalidAddress(new_address));
-        }
-        self.com.write(
-            self.address,
-            &[Register::I2C_SLAVE_DEVICE_ADDRESS as u8, new_address],
-        )?;
-        self.address = new_address;
-
-        Ok(())
-    }
-
     fn power_on(&mut self) -> Result<(), E> {
         // TODO use pin to poweron
         // XXX: not-needed?
@@ -112,7 +154,6 @@ where
     fn read_register(&mut self, reg: Register) -> Result<u8, E> {
         let mut data: [u8; 1] = [0];
         // FIXME:
-        //  * device address is not a const
         //  * register address is u16
         self.com.write_read(self.address, &[reg as u8], &mut data)?;
         Ok(data[0])
@@ -121,7 +162,6 @@ where
     fn read_byte(&mut self, reg: u8) -> Result<u8, E> {
         let mut data: [u8; 1] = [0];
         // FIXME:
-        //  * device address is not a const
         //  * register address is u16
         self.com.write_read(self.address, &[reg], &mut data)?;
         Ok(data[0])
@@ -153,7 +193,7 @@ where
     fn read_16bit(&mut self, reg: Register) -> Result<u16, E> {
         let mut buffer: [u8; 2] = [0, 0];
         self.read_registers(reg, &mut buffer)?;
-        Ok((u16(buffer[0]) << 8) + u16(buffer[1]))
+        Ok(((buffer[0] as u16) << 8) + (buffer[1] as u16))
     }
 
     fn write_byte(&mut self, reg: u8, byte: u8) -> Result<(), E> {
@@ -679,7 +719,7 @@ where
                 msrc_dss_tcc_mclks as u16,
                 pre_range_vcselperiod_pclks,
             ),
-            pre_range_mclks: pre_range_mclks,
+            pre_range_mclks,
             pre_range_microseconds: timeout_mclks_to_microseconds(
                 pre_range_mclks,
                 pre_range_vcselperiod_pclks,

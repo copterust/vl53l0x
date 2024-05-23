@@ -7,7 +7,6 @@
 
 use cast::u16;
 use hal::i2c::I2c;
-use nb;
 
 const DEFAULT_ADDRESS: u8 = 0x29;
 

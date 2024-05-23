@@ -6,13 +6,13 @@
 #![no_std]
 
 use cast::u16;
-use hal::blocking::i2c::{Write, WriteRead};
+use hal::i2c::I2c;
 use nb;
 
 const DEFAULT_ADDRESS: u8 = 0x29;
 
 /// dummy
-pub struct VL53L0x<I2C: hal::blocking::i2c::WriteRead> {
+pub struct VL53L0x<I2C: I2c> {
     com: I2C,
     /// dummy
     pub revision_id: u8,
@@ -45,12 +45,12 @@ impl<E> core::convert::From<E> for Error<E> {
 
 impl<I2C, E> VL53L0x<I2C>
 where
-    I2C: WriteRead<Error = E> + Write<Error = E>,
+    I2C: I2c<Error = E>,
 {
     /// Creates new driver with default address.
     pub fn new(i2c: I2C) -> Result<VL53L0x<I2C>, Error<E>>
     where
-        I2C: hal::blocking::i2c::WriteRead<Error = E>,
+        I2C: I2c<Error = E>,
     {
         VL53L0x::with_address(i2c, DEFAULT_ADDRESS)
     }
@@ -58,7 +58,7 @@ where
     /// Creates new driver with given address.
     pub fn with_address(i2c: I2C, address: u8) -> Result<VL53L0x<I2C>, Error<E>>
     where
-        I2C: hal::blocking::i2c::WriteRead<Error = E>,
+        I2C: I2c<Error = E>,
     {
         let mut chip = VL53L0x {
             com: i2c,

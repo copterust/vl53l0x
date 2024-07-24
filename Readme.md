@@ -2,7 +2,7 @@
 
 > no_std driver for the vl53l0x [vl53l0x](https://www.st.com/resource/en/datasheet/vl53l0x.pdf) (Time of Flight IR distance sensor).
 
-[![Build Status](https://travis-ci.org/copterust/vl53l0x.svg?branch=master)](https://travis-ci.org/copterust/vl53l0x)
+[![Build Status](https://github.com/copterust/vl53l0x/actions/workflows/ci.yaml/badge.svg)
 
 ## What works
 

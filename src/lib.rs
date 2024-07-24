@@ -5,7 +5,6 @@
 #![allow(dead_code)]
 #![no_std]
 
-use cast::u16;
 use hal::i2c::I2c;
 
 const DEFAULT_ADDRESS: u8 = 0x29;
@@ -152,7 +151,7 @@ where
     fn read_16bit(&mut self, reg: Register) -> Result<u16, E> {
         let mut buffer: [u8; 2] = [0, 0];
         self.read_registers(reg, &mut buffer)?;
-        Ok((u16(buffer[0]) << 8) + u16(buffer[1]))
+        Ok(((buffer[0] as u16) << 8) + (buffer[1] as u16))
     }
 
     fn write_byte(&mut self, reg: u8, byte: u8) -> Result<(), E> {

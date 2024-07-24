@@ -13,10 +13,6 @@ edition = "2018"
 [dependencies]
 nb = "0.1"
 
-[dependencies.cast]
-default-features = false
-version = "0.2.2"
-
 [dependencies.hal]
 version = "1.0"
 package = "embedded-hal"

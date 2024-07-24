@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  schedule:
+    - cron: "50 4 * * *"
+  workflow_dispatch:
+
+env:
+  target: thumbv7em-none-eabi
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  compile:
+    name: Compile
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust_toolchain:
+          - nightly
+          - stable
+          - beta
+    steps:
+      - name: Setup | Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup | Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust_toolchain }}
+          target: ${{ env.target }}
+          components: rustfmt, rust-src
+
+      - name: Build | Compile, all
+        env:
+          ESP_IDF_VERSION: ${{ matrix.idf-version }}
+          ESP_IDF_SDKCONFIG_DEFAULTS: "${{ github.workspace }}/.github/configs/sdkconfig.defaults"
+          RUSTFLAGS: "${{ matrix.idf-version == 'release/v5.1' && '--cfg espidf_time64' || ''}}"
+        run: cargo build --target ${{ env.target }} --verbose

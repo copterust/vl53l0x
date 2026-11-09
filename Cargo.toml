@@ -16,3 +16,8 @@ nb = "0.1"
 [dependencies.hal]
 version = "1.0"
 package = "embedded-hal"
+
+[dev-dependencies.embedded-hal-mock]
+version = "0.11"
+default-features = false
+features = ["eh1"]

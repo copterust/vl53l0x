@@ -577,7 +577,10 @@ where
 
         // "Set interrupt config to new sample ready"
 
-        self.set_gpio_config(GpioFunctionality::NewSampleReady, GpioPolarity::ActiveLow)?;
+        self.set_gpio_config(
+            GpioFunctionality::NewSampleReady,
+            GpioPolarity::ActiveLow,
+        )?;
 
         // "Disable MSRC and TCC by default"
         // MSRC = Minimum Signal Rate Check
@@ -813,8 +816,7 @@ where
     /// # Example
     /// ```
     /// # use vl53l0x::{VL53L0x, Error};
-    /// # fn test() -> Result<(), Error<()>> {
-    /// # let i2c = unimplemented!(); // dummy_i2c();
+    /// # fn example<I2C: hal::i2c::I2c>(i2c: I2C) -> Result<(), Error<I2C::Error>> {
     /// # let mut tof = VL53L0x::new(i2c)?;
     /// tof.set_interrupt_thresholds_mm(100, 300)?; // 10cm to 30cm
     /// let (lo, hi) = tof.get_interrupt_thresholds_mm()?;
@@ -871,8 +873,7 @@ where
     /// # Example
     /// ```
     /// # use vl53l0x::{VL53L0x, GpioFunctionality, GpioPolarity, Error};
-    /// # fn test() -> Result<(), Error<()>> {
-    /// # let i2c = unimplemented!(); // dummy_i2c();
+    /// # fn example<I2C: hal::i2c::I2c>(i2c: I2C) -> Result<(), Error<I2C::Error>> {
     /// # let mut tof = VL53L0x::new(i2c)?;
     /// // Trigger interrupt when data is ready, active-low
     /// tof.set_gpio_config(
@@ -1092,4 +1093,135 @@ pub enum GpioPolarity {
     ActiveLow,
     /// GPIO pulls high when interrupt occurs
     ActiveHigh,
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+    use embedded_hal_mock::eh1::i2c::{Mock, Transaction};
+    use std::vec;
+
+    const ADDR: u8 = DEFAULT_ADDRESS;
+
+    /// Driver over a scripted bus, bypassing `new()`: its hardware init
+    /// would dominate every script, and these tests exercise single methods.
+    fn driver(expectations: &[Transaction]) -> VL53L0x<Mock> {
+        VL53L0x {
+            com: Mock::new(expectations),
+            revision_id: 0,
+            io_mode2v8: true,
+            stop_variable: 0,
+            measurement_timing_budget_microseconds: 0,
+            address: ADDR,
+        }
+    }
+
+    /// The driver issues register writes as write_read with a 1-byte readback.
+    fn write(bytes: &[u8]) -> Transaction {
+        Transaction::write_read(ADDR, bytes.to_vec(), vec![0])
+    }
+
+    fn read(reg: u8, response: &[u8]) -> Transaction {
+        Transaction::write_read(ADDR, vec![reg], response.to_vec())
+    }
+
+    #[test]
+    fn thresholds_are_written_halved_big_endian() {
+        let mut tof = driver(&[
+            write(&[Register::SYSTEM_THRESH_LOW as u8, 0x00, 50]),
+            write(&[Register::SYSTEM_THRESH_HIGH as u8, 0x00, 150]),
+        ]);
+        tof.set_interrupt_thresholds_mm(100, 300).unwrap();
+        tof.com.done();
+    }
+
+    #[test]
+    fn thresholds_at_upper_limit() {
+        let mut tof = driver(&[
+            write(&[Register::SYSTEM_THRESH_LOW as u8, 0x0F, 0xFF]),
+            write(&[Register::SYSTEM_THRESH_HIGH as u8, 0x0F, 0xFF]),
+        ]);
+        tof.set_interrupt_thresholds_mm(8190, 8190).unwrap();
+        tof.com.done();
+    }
+
+    #[test]
+    fn thresholds_are_read_doubled_ignoring_reserved_bits() {
+        let mut tof = driver(&[
+            read(Register::SYSTEM_THRESH_LOW as u8, &[0x00, 50]),
+            read(Register::SYSTEM_THRESH_HIGH as u8, &[0xF0, 150]),
+        ]);
+        assert_eq!(tof.get_interrupt_thresholds_mm().unwrap(), (100, 300));
+        tof.com.done();
+    }
+
+    #[test]
+    fn inverted_thresholds_are_rejected_without_bus_traffic() {
+        let mut tof = driver(&[]);
+        assert!(matches!(
+            tof.set_interrupt_thresholds_mm(300, 100),
+            Err(Error::InvalidArgument)
+        ));
+        tof.com.done();
+    }
+
+    #[test]
+    fn out_of_range_thresholds_are_rejected_without_bus_traffic() {
+        let mut tof = driver(&[]);
+        assert!(matches!(
+            tof.set_interrupt_thresholds_mm(100, 8191),
+            Err(Error::InvalidArgument)
+        ));
+        tof.com.done();
+    }
+
+    fn gpio_script(
+        func: u8,
+        mux_before: u8,
+        mux_after: u8,
+    ) -> [Transaction; 5] {
+        [
+            write(&[Register::SYSTEM_INTERRUPT_CONFIG_GPIO as u8, func]),
+            read(Register::GPIO_HV_MUX_ACTIVE_HIGH as u8, &[mux_before]),
+            write(&[Register::GPIO_HV_MUX_ACTIVE_HIGH as u8, mux_after]),
+            write(&[Register::SYSTEM_INTERRUPT_CLEAR as u8, 0x01]),
+            write(&[Register::SYSTEM_INTERRUPT_CLEAR as u8, 0x00]),
+        ]
+    }
+
+    #[test]
+    fn gpio_active_low_clears_polarity_bit_only() {
+        let mut tof = driver(&gpio_script(0x04, 0xFF, 0xEF));
+        tof.set_gpio_config(
+            GpioFunctionality::NewSampleReady,
+            GpioPolarity::ActiveLow,
+        )
+        .unwrap();
+        tof.com.done();
+    }
+
+    #[test]
+    fn gpio_active_high_sets_polarity_bit_only() {
+        let mut tof = driver(&gpio_script(0x03, 0x01, 0x11));
+        tof.set_gpio_config(
+            GpioFunctionality::OutOfWindow,
+            GpioPolarity::ActiveHigh,
+        )
+        .unwrap();
+        tof.com.done();
+    }
+
+    #[test]
+    fn gpio_functionality_codes() {
+        for (func, code) in [
+            (GpioFunctionality::LevelLow, 0x01),
+            (GpioFunctionality::LevelHigh, 0x02),
+        ] {
+            let mut tof = driver(&gpio_script(code, 0x00, 0x00));
+            tof.set_gpio_config(func, GpioPolarity::ActiveLow).unwrap();
+            tof.com.done();
+        }
+    }
 }
